@@ -1,46 +1,33 @@
 import streamlit as st
-from langchain_community.chat_models import ChatOpenAI
-from langchain.chains import ConversationChain
-from langchain.memory import ConversationBufferMemory
+from openai import OpenAI
 
-# Titel
-st.title("🧮 Mathe-KI-Agent mit Gedächtnis")
+st.set_page_config(page_title="KI-Mathe-Chat", layout="centered")
+st.title("💬 Mathe-Chatbot mit GPT-4")
 
-# API-Key aus Streamlit Secrets
-api_key = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Initialisiere GPT-4-Modell über LangChain
-llm = ChatOpenAI(
-    openai_api_key=api_key,
-    model="gpt-4",
-    temperature=0.4  # optional: weniger kreativ, mehr sachlich
-)
+# Chat-Verlauf initialisieren
+if "chatverlauf" not in st.session_state:
+    st.session_state.chatverlauf = []
 
-# Gedächtnis vorbereiten (für Session)
-memory = ConversationBufferMemory()
+# Eingabe der SuS
+frage = st.chat_input("Stell deine Mathefrage...")
 
-# Prompt: GPT soll wie Mathelehrer antworten
-conversation = ConversationChain(
-    llm=llm,
-    memory=memory,
-    verbose=False
-)
-conversation.prompt.template = (
-    "Du bist ein geduldiger Mathematik-Coach für Schüler:innen der Sekundarstufe 1. "
-    "Antworte in einfachen Worten, mit Beispielen, und stelle auch Rückfragen, wenn nötig.\n\n"
-    "Chatverlauf:\n{history}\nSchüler: {input}\nCoach:"
-)
-
-# Eingabefeld für SuS
-frage = st.text_input("Gib hier deine Mathefrage ein:")
-
-# Verarbeite Frage
+# Frage hinzufügen und an GPT senden
 if frage:
-    with st.spinner("GPT denkt nach..."):
-        antwort = conversation.run(frage)
-        st.markdown("### 💬 Antwort:")
-        st.write(antwort)
+    st.session_state.chatverlauf.append({"role": "user", "content": frage})
 
-        # Optional: Verlauf anzeigen
-        with st.expander("🧠 Verlauf (Gedächtnis anzeigen)"):
-            st.write(memory.buffer)
+    with st.spinner("GPT denkt nach..."):
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Du bist ein geduldiger Mathelehrer auf Sekundarstufe 1."}
+            ] + st.session_state.chatverlauf
+        )
+        antwort = response.choices[0].message.content
+        st.session_state.chatverlauf.append({"role": "assistant", "content": antwort})
+
+# Chatverlauf anzeigen (wie bei chatgpt.com)
+for msg in st.session_state.chatverlauf:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
