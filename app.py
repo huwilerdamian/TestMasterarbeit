@@ -1,15 +1,15 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 
 st.title("🧮 Mathe-KI-Agent")
 
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 frage = st.text_input("Gib hier deine Mathefrage ein:")
 
 if frage:
     with st.spinner("GPT denkt nach..."):
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": frage}]
         )
