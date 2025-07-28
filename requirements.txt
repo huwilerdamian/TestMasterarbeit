@@ -1,4 +1,6 @@
 streamlit
 openai>=1.0
+pytesseract
+Pillow
 langchain
 langchain-community
