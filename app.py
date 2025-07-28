@@ -48,10 +48,13 @@ if textfrage or bild:
     ] + st.session_state.chatverlauf
 
     # Aktuelle User-Nachricht hinzufügen
-    if len(user_content) == 1:
-        messages.append({"role": "user", "content": user_content[0]})
+    if len(user_content) == 1 and user_content[0]["type"] == "text":
+        # Nur Text → als einfacher String senden
+        messages.append({"role": "user", "content": user_content[0]["text"]})
     else:
+        # Text + Bild oder nur Bild → als array of parts senden
         messages.append({"role": "user", "content": user_content})
+
 
     # GPT-4o API-Aufruf
     with st.spinner("GPT denkt nach..."):
