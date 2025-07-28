@@ -2,50 +2,79 @@ import streamlit as st
 from PIL import Image
 from openai import OpenAI
 import base64
+import json
+import os
 
+# 📁 Datei für den gespeicherten Verlauf
+CHAT_FILE = "chatverlauf.json"
+
+# 🔄 Chatverlauf laden/speichern
+def save_chatverlauf(verlauf):
+    with open(CHAT_FILE, "w", encoding="utf-8") as f:
+        json.dump(verlauf, f, ensure_ascii=False, indent=2)
+
+def load_chatverlauf():
+    if os.path.exists(CHAT_FILE):
+        with open(CHAT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+# 🧠 Session initialisieren
+if "chatverlauf" not in st.session_state:
+    st.session_state.chatverlauf = load_chatverlauf()
+
+# 🔁 Button zum Zurücksetzen
+if st.button("🔁 Verlauf zurücksetzen"):
+    st.session_state.chatverlauf = []
+    if os.path.exists(CHAT_FILE):
+        os.remove(CHAT_FILE)
+    st.rerun()
+
+# 🎨 Layout
 st.set_page_config(page_title="📷💬 Mathe-Chat", layout="centered")
 st.title("🧮 Mathe-Chatbot mit Text & Bild")
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-if "chatverlauf" not in st.session_state:
-    st.session_state.chatverlauf = []
+# 🧑‍🎓 Texteingabe
+textfrage = st.chat_input("Stelle deine Mathefrage...")
 
-# Eingabefelder
-col1, col2 = st.columns([4, 1])
-with col1:
-    textfrage = st.chat_input("Stelle deine Mathefrage...")
-with col2:
-    bild = st.file_uploader("📷", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
+# 🖼️ Optionaler Bild-Upload
+bild = st.file_uploader("📷 Optional: Lade ein Bild hoch", type=["png", "jpg", "jpeg"])
 
-# Nachricht senden nur wenn Button gedrückt oder Text abgeschickt
-if (textfrage or bild):
-    user_content = []
+# 👉 Nachricht senden, wenn Text oder Bild
+if textfrage or bild:
+    user_message = textfrage if textfrage else ""
 
-    if textfrage:
-        user_content.append({"type": "text", "text": textfrage})
-
+    # Bild vorbereiten (falls vorhanden)
+    image_dict = None
     if bild:
         bytes_data = bild.getvalue()
         base64_image = base64.b64encode(bytes_data).decode("utf-8")
-        user_content.append({
+        image_dict = {
             "type": "image_url",
             "image_url": {
                 "url": f"data:image/jpeg;base64,{base64_image}"
             }
-        })
+        }
 
-    # Systemrolle + Chatverlauf
+    # GPT-Nachricht erstellen
     messages = [{"role": "system", "content": "Du bist ein hilfsbereiter Mathe-Coach für SuS auf Sekundarstufe 1. Erkläre klar, freundlich und mit Beispielen."}]
-    messages.extend(st.session_state.chatverlauf)
+    for m in st.session_state.chatverlauf:
+        messages.append(m)
 
-    # Nachricht je nach Format korrekt anhängen
-    if len(user_content) == 1 and user_content[0]["type"] == "text":
-        messages.append({"role": "user", "content": user_content[0]["text"]})
+    if image_dict:
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_message},
+                image_dict
+            ]
+        })
     else:
-        messages.append({"role": "user", "content": user_content})
+        messages.append({"role": "user", "content": user_message})
 
-    # GPT-Antwort holen
+    # 🔄 Anfrage an GPT-4o
     with st.spinner("GPT denkt nach..."):
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -57,16 +86,9 @@ if (textfrage or bild):
     # Verlauf speichern
     st.session_state.chatverlauf.append(messages[-1])
     st.session_state.chatverlauf.append({"role": "assistant", "content": antwort})
+    save_chatverlauf(st.session_state.chatverlauf)
 
-# Darstellung des Chatverlaufs
+# 💬 Chatverlauf anzeigen
 for msg in st.session_state.chatverlauf:
     with st.chat_message(msg["role"]):
-        if isinstance(msg["content"], str):
-            st.markdown(msg["content"])
-        elif isinstance(msg["content"], list):
-            for part in msg["content"]:
-                if part["type"] == "text":
-                    st.markdown(part["text"])
-                elif part["type"] == "image_url":
-                    img_data = part["image_url"]["url"].split(",")[1]
-                    st.image(base64.b64decode(img_data), use_column_width=True)
+        st.markdown(msg["content"])
