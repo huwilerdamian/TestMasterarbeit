@@ -1,61 +1,70 @@
 import streamlit as st
 from PIL import Image
-import pytesseract
 from openai import OpenAI
+import base64
 
-# 👉 Konfiguration
-st.set_page_config(page_title="📷 Mathe-Chat mit Bild", layout="centered")
-st.title("🧮 Mathe-Chatbot mit Bild-Upload & GPT-4")
+st.set_page_config(page_title="📷💬 Mathe-Chat", layout="centered")
+st.title("🧮 Mathe-Chatbot mit Text & Bild")
 
-# 👉 OpenAI initialisieren
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# 👉 Chatverlauf speichern (Session)
 if "chatverlauf" not in st.session_state:
     st.session_state.chatverlauf = []
 
-# 👉 Bild-Upload
-bild = st.file_uploader("📷 Lade ein Bild mit einer Matheaufgabe hoch", type=["png", "jpg", "jpeg"])
+# 🧑‍🎓 Texteingabe
+textfrage = st.chat_input("Stelle deine Mathefrage...")
 
-if bild:
-    # 📸 Bild anzeigen
-    image = Image.open(bild)
-    st.image(image, caption="Hochgeladenes Bild", use_column_width=True)
+# 🖼️ Optionaler Bild-Upload
+bild = st.file_uploader("📷 Optional: Lade ein Bild hoch", type=["png", "jpg", "jpeg"])
 
-    # 🧠 Text mit OCR extrahieren
-    aufgabe = pytesseract.image_to_string(image, lang="deu")  # Falls englisch: lang="eng"
+# 👉 Nachricht nur senden, wenn mindestens Text oder Bild vorhanden
+if textfrage or bild:
+    user_message = ""
 
-    if aufgabe.strip():
-        st.markdown("### 📝 Erkannter Aufgabentext:")
-        st.code(aufgabe)
+    if textfrage:
+        user_message += textfrage + "\n"
 
-        # Nutzerfrage speichern
-        st.session_state.chatverlauf.append({"role": "user", "content": aufgabe})
+    # Bild vorbereiten, falls vorhanden
+    image_dict = None
+    if bild:
+        bytes_data = bild.getvalue()
+        base64_image = base64.b64encode(bytes_data).decode("utf-8")
+        image_dict = {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{base64_image}"
+            }
+        }
 
-        # GPT-4-Abfrage
-        with st.spinner("GPT analysiert die Aufgabe..."):
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "Du bist ein geduldiger Mathematik-Coach für Schüler:innen der Sekundarstufe 1. Erkläre Schritt für Schritt und verständlich."}
-                ] + st.session_state.chatverlauf
-            )
-            antwort = response.choices[0].message.content
-            st.session_state.chatverlauf.append({"role": "assistant", "content": antwort})
+    # Chatverlauf aufbauen
+    messages = [
+        {"role": "system", "content": "Du bist ein hilfsbereiter Mathe-Coach für SuS auf Sekundarstufe 1. Erkläre klar, freundlich und mit Beispielen."}
+    ]
 
-        st.markdown("### 💬 GPT-Antwort:")
-        st.markdown(antwort)
+    for msg in st.session_state.chatverlauf:
+        messages.append(msg)
 
-        # Verlauf anzeigen
-        with st.expander("🧠 Verlauf anzeigen"):
-            for msg in st.session_state.chatverlauf:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
+    # Aktuelle Nachricht hinzufügen
+    if image_dict:
+        messages.append({"role": "user", "content": [{"type": "text", "text": user_message}, image_dict]})
     else:
-        st.warning("⚠️ Es konnte kein Text erkannt werden. Bitte ein klareres Bild hochladen.")
+        messages.append({"role": "user", "content": user_message})
 
-# 🔁 Optional: Reset-Button
-if st.button("🔄 Verlauf zurücksetzen"):
-    st.session_state.chatverlauf = []
-    st.experimental_rerun()
+    # GPT-4 Vision-Aufruf
+    with st.spinner("GPT denkt nach..."):
+        response = client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=messages,
+            max_tokens=1000
+        )
+
+        antwort = response.choices[0].message.content
+
+    # Verlauf speichern
+    st.session_state.chatverlauf.append({"role": "user", "content": user_message})
+    st.session_state.chatverlauf.append({"role": "assistant", "content": antwort})
+
+# 💬 Chatverlauf anzeigen
+for msg in st.session_state.chatverlauf:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
