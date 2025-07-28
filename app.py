@@ -50,10 +50,10 @@ if textfrage or bild:
     else:
         messages.append({"role": "user", "content": user_message})
 
-    # GPT-4 Vision-Aufruf
+    # GPT-4o
     with st.spinner("GPT denkt nach..."):
         response = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=messages,
             max_tokens=1000
         )
