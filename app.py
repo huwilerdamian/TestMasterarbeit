@@ -1,18 +1,14 @@
 import streamlit as st
 from openai import OpenAI
-import openai_agents
+from agents import Agent, Runner
+from agents.session import new_session_id
 
-# API-Key aus Streamlit Secrets oder Umgebung
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Deine Workflow- oder Agent-ID
-AGENT_ID = st.secrets["AGENT_ID"]
-
-st.title("🧮 Mathe-Chatbot (einfacher Agent-Aufruf)")
-
 if "session_id" not in st.session_state:
-    st.session_state.session_id = openai_agents.new_session_id()
+    st.session_state.session_id = new_session_id()
 
+AGENT_ID = st.secrets["AGENT_ID"]
 user_text = st.chat_input("Stelle deine Mathefrage...")
 
 if user_text:
@@ -20,12 +16,12 @@ if user_text:
         st.markdown(user_text)
 
     with st.spinner("Agent antwortet..."):
-        # ✨ Direkter Aufruf über das agents SDK
-        run = openai_agents.runs.create(
+        runner = Runner(client)
+        result = runner.run_sync(
             agent_id=AGENT_ID,
             input={"text": user_text},
             session=st.session_state.session_id,
         )
 
     with st.chat_message("assistant"):
-        st.markdown(run.output_text)
+        st.markdown(result.output_text)
