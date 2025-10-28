@@ -2,6 +2,10 @@ import streamlit as st
 from agents import Runner
 from uuid import uuid4
 import os
+import openai_agents
+import streamlit as st
+
+st.info(f"SDK-Version: {getattr(openai_agents, '__version__', 'unbekannt')}")
 
 st.set_page_config(page_title="🧮 Mathe-Chatbot", layout="centered")
 st.title("🧮 Mathe-Chatbot mit echter Server-Memory")
@@ -14,7 +18,7 @@ os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 # 🧠 Eine stabile Sitzungs-ID erzeugen (gleiche ID = gemeinsamer Kontext)
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid4())
-st.info(f"SDK-Version: {openai_agents.__version__}")
+
 runner = Runner()
 
 # 💬 Texteingabe
