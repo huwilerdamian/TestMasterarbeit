@@ -1,14 +1,19 @@
 import streamlit as st
 from openai import OpenAI
-from agents import Agent, Runner
-from agents.session import new_session_id
+from agents import Runner
+from uuid import uuid4
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+st.set_page_config(page_title="🧮 Mathe-Chatbot", layout="centered")
+st.title("🧮 Mathe-Chatbot mit Agent")
+
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+AGENT_ID = st.secrets["AGENT_ID"]
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 if "session_id" not in st.session_state:
-    st.session_state.session_id = new_session_id()
+    st.session_state.session_id = str(uuid4())
 
-AGENT_ID = st.secrets["AGENT_ID"]
 user_text = st.chat_input("Stelle deine Mathefrage...")
 
 if user_text:
