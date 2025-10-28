@@ -1,14 +1,18 @@
 import streamlit as st
 from PIL import Image
 from openai import OpenAI
+import openai
 import base64
 import os
 from io import BytesIO
 from uuid import uuid4
 
 # Streamlit page
-st.set_page_config(page_title="📷💬 Mathe-Chat (Agents SDK Memory)", layout="centered")
-st.title("🧮 Mathe-Chatbot mit OpenAI Agents SDK (Agent Memory)")
+st.set_page_config(page_title="📷💬 Mathe-Chat (Agents/Workflows SDK Memory)", layout="centered")
+st.title("🧮 Mathe-Chatbot mit OpenAI Agents/Workflows SDK (Agent Memory)")
+
+# Debug: show installed openai version
+st.info(f"installierte openai-Version: {openai.__version__}")
 
 # API-Key: first try Streamlit secrets, then environment variable
 OPENAI_API_KEY = None
@@ -17,7 +21,7 @@ if "OPENAI_API_KEY" in st.secrets:
 else:
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# Agent ID: must be provided to use Agent Memory
+# Agent / Workflow ID: must be provided to use Agent Memory (set to your Workflow ID)
 AGENT_ID = None
 if "AGENT_ID" in st.secrets:
     AGENT_ID = st.secrets["AGENT_ID"]
@@ -29,7 +33,7 @@ if not OPENAI_API_KEY:
     st.stop()
 
 if not AGENT_ID:
-    st.error("AGENT_ID nicht konfiguriert. Lege einen Agenten im OpenAI-Interface an und setze AGENT_ID in st.secrets oder als Umgebungsvariable.")
+    st.error("AGENT_ID (Workflow-ID) nicht konfiguriert. Lege einen Agent/Workflow im OpenAI-Interface an und setze AGENT_ID in st.secrets oder als Umgebungsvariable.")
     st.stop()
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -59,7 +63,7 @@ def extract_agent_text(run_resp) -> str:
         # many SDK versions return a dict-like response
         if isinstance(run_resp, dict):
             # check common fields
-            for key in ("output", "response", "result", "results", "content"):
+            for key in ("output", "response", "result", "results", "content", "messages"):
                 if key in run_resp and run_resp[key]:
                     val = run_resp[key]
                     if isinstance(val, str):
@@ -69,8 +73,8 @@ def extract_agent_text(run_resp) -> str:
                     if isinstance(val, list):
                         parts = []
                         for item in val:
-                            if isinstance(item, dict) and "content" in item:
-                                parts.append(item["content"])
+                            if isinstance(item, dict) and ("content" in item or "text" in item):
+                                parts.append(item.get("content") or item.get("text"))
                             else:
                                 parts.append(str(item))
                         return "\n\n".join(parts)
@@ -84,8 +88,56 @@ def extract_agent_text(run_resp) -> str:
     # fallback
     return str(run_resp)
 
+def run_agent_compat(client, agent_or_workflow_id, input_payload, session_id):
+    """
+    Try multiple possible SDK entrypoints for Agents/Workflows.
+    Returns the raw run response or raises an informative exception.
+    """
+    last_exc = None
 
-# When the user submits, call the Agent and rely on Agent Memory (server-side) to persist context
+    # 1) Try client.workflows.run(workflow=..., input=..., session=...)
+    try:
+        if hasattr(client, "workflows"):
+            try:
+                return client.workflows.run(workflow=agent_or_workflow_id, input=input_payload, session=session_id)
+            except TypeError:
+                # alternative param names
+                return client.workflows.run(id=agent_or_workflow_id, input=input_payload, session=session_id)
+    except Exception as e:
+        last_exc = e
+
+    # 2) Try client.agents.run(agent=..., input=..., session=...)
+    try:
+        if hasattr(client, "agents"):
+            try:
+                return client.agents.run(agent=agent_or_workflow_id, input=input_payload, session=session_id)
+            except TypeError:
+                return client.agents.run(id=agent_or_workflow_id, input=input_payload, session=session_id)
+    except Exception as e:
+        last_exc = e
+
+    # 3) Try workflow_runs / runs style API (common alternative)
+    try:
+        if hasattr(client, "workflow_runs"):
+            try:
+                return client.workflow_runs.create(workflow=agent_or_workflow_id, input=input_payload, session=session_id)
+            except TypeError:
+                return client.workflow_runs.create(id=agent_or_workflow_id, input=input_payload, session=session_id)
+        if hasattr(client, "runs"):
+            try:
+                return client.runs.create(workflow=agent_or_workflow_id, input=input_payload, session=session_id)
+            except TypeError:
+                return client.runs.create(id=agent_or_workflow_id, input=input_payload, session=session_id)
+    except Exception as e:
+        last_exc = e
+
+    raise RuntimeError(
+        "Kein kompatibler Agents-/Workflows-Endpunkt in der aktuellen openai-Python-Installation gefunden. "
+        "Prüfe openai.__version__ und update ggf. mit `pip install --upgrade openai`. "
+        f"Letzte Fehlermeldung: {last_exc}"
+    )
+
+# When the user submits, call the Agent/Workflow and rely on server-side Memory to persist context
 if user_text or uploaded_image:
     payload = build_agent_input(user_text, uploaded_image)
 
@@ -96,19 +148,15 @@ if user_text or uploaded_image:
         elif user_text:
             st.markdown(user_text)
         if uploaded_image:
-            # show uploaded image immediately
             img_bytes = uploaded_image.getvalue()
             st.image(img_bytes)
 
-    with st.spinner("Agent denkt nach und speichert den Kontext in Agent Memory..."):
+    with st.spinner("Agent/Workflow denkt nach und speichert den Kontext in Agent Memory..."):
         try:
-            # Use the Agents SDK run call and provide a session identifier so the Agent's Memory ties exchanges together.
-            # For openai-python 2.6.1 the common pattern is client.agents.run(agent=..., input=..., session=...)
-            run_resp = client.agents.run(agent=AGENT_ID, input=payload, session=session_id)
+            run_resp = run_agent_compat(client, AGENT_ID, payload, session_id)
             assistant_text = extract_agent_text(run_resp)
         except Exception as e:
-            # If the Agents API call fails, show the error and try a chat fallback
-            st.error(f"Agent call fehlgeschlagen: {e}")
+            st.error(f"Agent/Workflow call fehlgeschlagen: {e}")
             assistant_text = None
             try:
                 # fallback to chat completions so the UI remains usable
@@ -125,29 +173,31 @@ if user_text or uploaded_image:
     with st.chat_message("assistant"):
         st.markdown(assistant_text)
 
-# Optionally provide a way to view what's in Agent Memory (if supported by your Agent setup).
+# Optionally provide a way to view what's in Agent Memory (if supported by your Agent/Workflow setup).
 if st.button("Konversation aus Agent Memory laden"):
     try:
-        # Attempt to fetch session/ memory for this agent session. The exact method may vary by SDK.
-        # Common patterns might include client.agents.get_session(agent=AGENT_ID, session=session_id)
-        # or client.sessions.get(session=session_id). Adjust based on your installed SDK.
         mem_resp = None
-        # try a couple of plausible methods
+        # try a couple of plausible methods for session/memory retrieval
         try:
-            mem_resp = client.agents.get_session(agent=AGENT_ID, session=session_id)
+            if hasattr(client, "workflows") and hasattr(client.workflows, "get_session"):
+                mem_resp = client.workflows.get_session(workflow=AGENT_ID, session=session_id)
         except Exception:
-            try:
+            pass
+        try:
+            if not mem_resp and hasattr(client, "agents") and hasattr(client.agents, "get_session"):
+                mem_resp = client.agents.get_session(agent=AGENT_ID, session=session_id)
+        except Exception:
+            pass
+        try:
+            if not mem_resp and hasattr(client, "sessions") and hasattr(client.sessions, "get"):
                 mem_resp = client.sessions.get(id=session_id)
-            except Exception:
-                try:
-                    mem_resp = client.agents.get(agent=AGENT_ID, session=session_id)
-                except Exception:
-                    mem_resp = None
+        except Exception:
+            pass
 
         if mem_resp:
-            st.subheader("Agent Memory / Session")
+            st.subheader("Agent/Workflow Memory / Session")
             st.write(mem_resp)
         else:
-            st.info("Konnte Agent-Memory / Session nicht automatisch abrufen. Überprüfe deine OpenAI SDK-Version und Agent-Konfiguration.")
+            st.info("Konnte Agent/Workflow-Memory / Session nicht automatisch abrufen. Überprüfe deine OpenAI SDK-Version und Agent/Workflow-Konfiguration.")
     except Exception as e:
         st.error(f"Fehler beim Laden der Agent-Memory: {e}")
