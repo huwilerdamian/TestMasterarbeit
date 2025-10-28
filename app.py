@@ -6,18 +6,18 @@ import os
 st.set_page_config(page_title="🧮 Mathe-Chatbot", layout="centered")
 st.title("🧮 Mathe-Chatbot mit Agent")
 
-# OpenAI-Key und Agent-ID laden
+# API-Key und Agent-ID aus Secrets laden
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 AGENT_ID = st.secrets["AGENT_ID"]
 
-# Key als Umgebungsvariable setzen (wichtig!)
+# Key als Umgebungsvariable setzen
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
-# Session-ID einmalig erzeugen
+# Eindeutige Session-ID erzeugen
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid4())
 
-# Runner initialisieren
+# Runner initialisieren (kein Parameter nötig)
 runner = Runner()
 
 # Chat-Eingabe
@@ -31,7 +31,7 @@ if user_text:
         result = runner.run_sync(
             agent_id=AGENT_ID,
             input={"text": user_text},
-            session=st.session_state.session_id,
+            session_id=st.session_state.session_id,  # ✅ richtiges Argument
         )
 
     with st.chat_message("assistant"):
