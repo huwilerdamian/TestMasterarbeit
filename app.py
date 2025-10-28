@@ -5,10 +5,11 @@ import base64
 import os
 from io import BytesIO
 from uuid import uuid4
-st.info(f"installierte openai-Version: {openai.__version__}")
+
 # Streamlit page
 st.set_page_config(page_title="📷💬 Mathe-Chat (Agents SDK Memory)", layout="centered")
 st.title("🧮 Mathe-Chatbot mit OpenAI Agents SDK (Agent Memory)")
+st.info(f"installierte openai-Version: {openai.__version__}")
 
 # API-Key: first try Streamlit secrets, then environment variable
 OPENAI_API_KEY = None
