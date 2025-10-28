@@ -38,6 +38,46 @@ if not AGENT_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Debug: Liste verfügbare Attributes vom client und vom openai Modul
+import inspect
+
+st.subheader("Debug: OpenAI SDK Diagnostics")
+try:
+    st.write("openai.__version__:", openai.__version__)
+except Exception as e:
+    st.write("Fehler beim Lesen von openai.__version__:", e)
+
+# Basic info about the client object
+try:
+    st.write("client type:", type(client))
+    st.write("client repr:", repr(client))
+    client_attrs = sorted([a for a in dir(client) if not a.startswith("_")])
+    st.write("Anzahl client attributes:", len(client_attrs))
+    st.write("client attributes (Auszug):", client_attrs[:200])  # evtl lang, zeigt ersten Teil
+except Exception as e:
+    st.write("Fehler beim Inspect client:", e)
+
+# Check specific likely namespaces
+for name in ("workflows", "agents", "workflow_runs", "runs", "sessions", "chat"):
+    try:
+        has = hasattr(client, name)
+        st.write(f"client hat '{name}': {has}")
+        if has:
+            ns = getattr(client, name)
+            ns_members = sorted([m for m in dir(ns) if not m.startswith("_")])
+            st.write(f"  -> members von client.{name} (Auszug):", ns_members[:60])
+    except Exception as e:
+        st.write(f"Fehler beim Prüfen von client.{name}: {e}")
+
+# Also check top-level module attributes
+try:
+    top_attrs = sorted([a for a in dir(openai) if not a.startswith("_")])
+    st.write("openai module attributes (Auszug):", top_attrs[:200])
+    for name in ("workflows", "agents", "workflow_runs", "runs", "OpenAI"):
+        st.write(f"openai hat '{name}':", hasattr(openai, name))
+except Exception as e:
+    st.write("Fehler beim Inspect openai module:", e)
+
 # Generate or reuse a session id so the Agent's memory is tied to this browser session.
 # We store only the session identifier locally — conversation content is persisted in the Agent Memory on the OpenAI side.
 if "agent_session_id" not in st.session_state:
