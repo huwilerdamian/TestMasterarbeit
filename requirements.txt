@@ -1,5 +1,5 @@
 streamlit
-openai>=1.0
+openai>=2.6.1
 pytesseract
 Pillow
 langchain
