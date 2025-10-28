@@ -14,7 +14,8 @@ os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 # 🧠 Eine stabile Sitzungs-ID erzeugen (gleiche ID = gemeinsamer Kontext)
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid4())
-
+import openai_agents
+st.info(f"SDK-Version: {openai_agents.__version__}")
 runner = Runner()
 
 # 💬 Texteingabe
