@@ -2,4 +2,4 @@ openai>=1.50.0
 streamlit
 pillow
 httpx
-openai-agents>=0.2.0
+openai-agents>=0.2.1
