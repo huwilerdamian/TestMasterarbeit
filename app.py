@@ -7,6 +7,7 @@ import os
 from io import BytesIO
 from uuid import uuid4
 from typing import Any, Dict
+import httpx
 
 # Streamlit page
 st.set_page_config(page_title="📷💬 Mathe-Chat (Workflow/Agent via HTTP)", layout="centered")
@@ -107,10 +108,54 @@ def extract_agent_text(run_resp: Any) -> str:
     return str(run_resp)
 
 
+def _call_client_post_flexible(client: OpenAI, ep: str, body: Dict[str, Any]):
+    """
+    Versucht verschiedene Signaturen für client.post(...) und client.request(...).
+    Gibt das rohes Antwortobjekt zurück oder wirft.
+    """
+    last_exc = None
+    # Try common patterns for client.post
+    try:
+        # first attempt: json kw (most common)
+        return client.post(ep, json=body)
+    except TypeError as e:
+        last_exc = e
+        # try alternative kw names
+        for kw in ("body", "data", "content", "json_body", "payload"):
+            try:
+                kwargs = {kw: body}
+                return client.post(ep, **kwargs)
+            except TypeError:
+                continue
+            except Exception as ex:
+                last_exc = ex
+                break
+    except Exception as e:
+        last_exc = e
+
+    # Try client.request with various signatures
+    try:
+        # many clients expose request(method, path, json=...) or request("POST", path, json=...)
+        try:
+            return client.request("POST", ep, json=body)
+        except TypeError:
+            try:
+                return client.request("POST", ep, data=body)
+            except TypeError:
+                # some clients expect path first then method
+                return client.request(ep, method="POST", json=body)
+    except Exception as e:
+        last_exc = e
+
+    # If we reached here, client-level invocation didn't work: raise the last exception for the caller to handle
+    raise last_exc or RuntimeError("client post invocation failed without exception detail")
+
+
 def run_workflow_via_http(client: OpenAI, workflow_id: str, input_payload: Dict[str, Any], session_id: str) -> Any:
     """
     Führt einen HTTP-Request aus, um einen Workflow/Agent-Run zu starten.
     Probiert typische Endpunkte durch, weil in manchen SDK-Versionen keine high-level wrappers verfügbar sind.
+    Wenn client.* Aufrufe nicht funktionieren, wird als Fallback direkter HTTP-Request via httpx mit Authorization-Header versucht.
     Gibt das geparste JSON-Objekt oder ein SDK-Objekt zurück.
     """
     # Mögliche Pfade (werden nacheinander versucht)
@@ -123,27 +168,25 @@ def run_workflow_via_http(client: OpenAI, workflow_id: str, input_payload: Dict[
     ]
 
     last_exc = None
-    for ep in endpoints:
-        try:
-            body = {"input": input_payload, "session": session_id}
-            # client.post ist in deiner Umgebung vorhanden (laut Debug)
-            resp = client.post(ep, json=body)
+    body = {"input": input_payload, "session": session_id}
 
-            # resp kann httpx.Response-ähnlich sein
+    for ep in endpoints:
+        # First try to call through the SDK client (flexible)
+        try:
+            resp = _call_client_post_flexible(client, ep, body)
+            # parse response similarly to earlier logic:
             if hasattr(resp, "status_code"):
                 status = resp.status_code
                 try:
                     data = resp.json()
                 except Exception:
-                    # fallback to text
                     data = {"raw_text": resp.text}
                 if 200 <= status < 300:
                     return data
                 else:
-                    # Server-Antwort mit Fehlercode — nützlich für Debug
                     raise RuntimeError(f"HTTP {status} vom Endpoint {ep}: {data}")
             else:
-                # resp ist ein dict oder SDK-Objekt
+                # resp might be dict or SDK object - accept dict or try to convert
                 if isinstance(resp, dict):
                     return resp
                 if hasattr(resp, "to_dict"):
@@ -156,8 +199,49 @@ def run_workflow_via_http(client: OpenAI, workflow_id: str, input_payload: Dict[
                 return str(resp)
         except Exception as e:
             last_exc = (ep, e)
-            # nächster endpoint versuchen
+            # try next endpoint
             continue
+
+    # If SDK-based attempts failed, try direct HTTP via httpx using client's auth headers or OPENAI_API_KEY
+    try:
+        # build a base URL
+        base_url = getattr(client, "base_url", None) or "https://api.openai.com"
+        # ensure ep from last tried endpoint (or first) appended properly
+        # we'll iterate endpoints again in httpx fallback
+        # prepare headers from client if possible
+        headers = None
+        try:
+            ah = getattr(client, "auth_headers", None)
+            if callable(ah):
+                headers = ah()
+            else:
+                headers = ah
+        except Exception:
+            headers = None
+        if not headers or not isinstance(headers, dict):
+            headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+
+        # Try httpx for each endpoint
+        for ep in endpoints:
+            full_url = base_url.rstrip("/") + "/" + ep.lstrip("/")
+            try:
+                r = httpx.post(full_url, json=body, headers=headers, timeout=30.0)
+                status = r.status_code
+                try:
+                    data = r.json()
+                except Exception:
+                    data = {"raw_text": r.text}
+                if 200 <= status < 300:
+                    return data
+                else:
+                    # include body for debugging
+                    raise RuntimeError(f"HTTP {status} vom Endpoint {full_url}: {data}")
+            except Exception as e:
+                last_exc = (full_url, e)
+                continue
+
+    except Exception as e:
+        last_exc = ("httpx-fallback-init", e)
 
     if last_exc:
         ep, exc = last_exc
@@ -177,9 +261,16 @@ def fetch_session_via_http(client: OpenAI, workflow_id: str, session_id: str) ->
         f"/v1/runs?session={session_id}",
     ]
     last_exc = None
+
+    # try SDK-level get first
     for ep in endpoints:
         try:
-            resp = client.get(ep)
+            # try client.get with common signatures
+            try:
+                resp = client.get(ep)
+            except TypeError:
+                # try alternative name signatures
+                resp = client.request("GET", ep)
             if hasattr(resp, "status_code"):
                 status = resp.status_code
                 try:
@@ -196,14 +287,38 @@ def fetch_session_via_http(client: OpenAI, workflow_id: str, session_id: str) ->
                 if hasattr(resp, "to_dict"):
                     return resp.to_dict()
                 if hasattr(resp, "json"):
-                    try:
-                        return resp.json()
-                    except Exception:
-                        return str(resp)
+                    return resp.json()
                 return str(resp)
         except Exception as e:
             last_exc = (ep, e)
             continue
+
+    # fallback to httpx
+    try:
+        base_url = getattr(client, "base_url", None) or "https://api.openai.com"
+        ah = getattr(client, "auth_headers", None)
+        if callable(ah):
+            headers = ah()
+        else:
+            headers = ah or {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+        for ep in endpoints:
+            full_url = base_url.rstrip("/") + "/" + ep.lstrip("/")
+            try:
+                r = httpx.get(full_url, headers=headers, timeout=30.0)
+                status = r.status_code
+                try:
+                    data = r.json()
+                except Exception:
+                    data = {"raw_text": r.text}
+                if 200 <= status < 300:
+                    return data
+                else:
+                    raise RuntimeError(f"HTTP {status} vom Endpoint {full_url}: {data}")
+            except Exception as e:
+                last_exc = (full_url, e)
+                continue
+    except Exception as e:
+        last_exc = ("httpx-fallback-init", e)
 
     if last_exc:
         ep, exc = last_exc
