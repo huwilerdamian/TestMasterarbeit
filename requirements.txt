@@ -3,3 +3,4 @@ pillow
 httpx
 openai-agents>=0.3.0
 openai>=1.51.0
+# force rebuild
